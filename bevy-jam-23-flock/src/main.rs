@@ -1,4 +1,6 @@
 use bevy::{prelude::*, render::camera::ScalingMode, window::PrimaryWindow};
+use kiddo::{float::kdtree::KdTree, SquaredEuclidean};
+use rustc_hash::FxHashMap;
 
 #[derive(Component)]
 struct Player{
@@ -13,7 +15,13 @@ struct Bird {
 #[derive(Component)]
 struct MainCamera;
 
+#[derive(Resource)]
+struct Birds {
+    count: usize,
+}
+
 fn main() {
+    fastrand::seed(37);
     App::new()
     .add_plugins(DefaultPlugins)   
     .add_systems(Startup, (setup, spawn_player, spawn_birds))
@@ -21,7 +29,7 @@ fn main() {
     .add_systems(Update, update_birds
         .after(update_player)
     )
-    .insert_resource(ClearColor(Color::rgb(0.53, 0.53, 0.53)))
+    .insert_resource(ClearColor(Color::rgb(1., 1., 1.) * 0.3))
     .run();
 }
 
@@ -36,7 +44,7 @@ fn spawn_player(mut commands: Commands) {
         Player {velocity: Vec2 {x: 0., y: 0.}},
         SpriteBundle {
             sprite: Sprite {
-                color: Color::rgb(0., 0.47, 1.),
+                color: Color::rgb(0., 1., 0.5),
                 custom_size: Some(Vec2::new(1., 1.)),
                 ..default()
             },
@@ -45,19 +53,21 @@ fn spawn_player(mut commands: Commands) {
 }
 
 fn spawn_birds(mut commands: Commands) {
-    for n in 0..10 {
+    let c: usize = 1000;
+    for n in 0..c {
         commands.spawn((
-            Bird {velocity: Vec2::new(n as f32, n as f32)},
+            Bird {velocity: Vec2::new(0 as f32, 0 as f32)},
             SpriteBundle {
                 sprite: Sprite {
-                    color: Color::rgb(0.1 * n as f32, 0., 1.),
+                    color: Color::rgb((1./c as f32) * n as f32, 0., 1.),
                     custom_size: Some(Vec2::new(1., 1.)),
                     ..default()
                 },
-                transform: Transform::from_translation(Vec3::new(n as f32, n as f32, 0.)),
+                transform: Transform::from_translation(Vec3::new((fastrand::f32() - 0.5) * 100., (fastrand::f32() - 0.5) * 100., 0.)),
                 ..default()}
         ));
     }
+    commands.insert_resource(Birds{count: c});
 }
 
 fn update_player(
@@ -91,14 +101,43 @@ fn update_player(
 fn update_birds(    
     time: Res<Time>,
     players: Query<&Transform, (With<Player>, Without<Bird>)>,
-    mut birds: Query<(&mut Transform, &mut Bird), With<Bird>>,
+    mut birds: Query<(Entity, &mut Transform, &mut Bird), With<Bird>>,
+    birdStats: Res<Birds>,
 ) {
+    const MAX_STEERING_FORCE: f32 = 0.75;    
+    const MAX_VELOCITY: f32 = 5.;        
+    const MIN_VELOCITY: f32 = 0.5;
+    const FOLLOW_FACTOR: f32 = 0.1;
+    const SEPERATION_FACTOR: f32 = 0.75;
     let delta = time.delta_seconds();
     let player = players.single();
-    for (mut transform, mut bird) in &mut birds {
-        let to_player = player.translation - transform.translation;       
-        bird.velocity =  to_player.normalize_or_zero().xy();
-        transform.translation = Vec3::new(transform.translation.x + bird.velocity.x, transform.translation.y + bird.velocity.y, 0.);
+    let mut kdtree: KdTree<f32, u32, 2, 32, u16> = KdTree::with_capacity(birdStats.count);
+    let mut positions = FxHashMap::with_capacity_and_hasher(birdStats.count, Default::default());
+
+    for (entity, transform, mut bird) in &mut birds {
+        kdtree.add(&[transform.translation.x, transform.translation.y], entity.index());
+        positions.insert(entity.index(), transform.clone());
+    }
+
+    for (entity, mut transform, mut bird) in &mut birds {
+        let to_player = (player.translation - transform.translation).xy() * FOLLOW_FACTOR;
+        let mut seperate = Vec2::new(0., 0.);
+        for n in kdtree.within_unsorted_iter::<SquaredEuclidean>(&[transform.translation.x, transform.translation.y], 10.) {
+            if ( n.item == entity.index()) {
+                continue;
+            }
+            if let Some(other) = positions.get(&n.item) {
+                let distance = n.distance;
+                let direction_from = (transform.translation.xy() - other.translation.xy()).normalize_or_zero();
+                seperate += direction_from * (distance * SEPERATION_FACTOR);
+            }
+        }
+
+        // TODO scale by timestep
+        let mut steering_force = (to_player + seperate).clamp_length_max(MAX_STEERING_FORCE);
+
+        bird.velocity = (bird.velocity + steering_force).clamp_length(MIN_VELOCITY, MAX_VELOCITY);
+        transform.translation = (transform.translation.xy() + bird.velocity * delta * 10.).extend(0.);
         // eprintln!("Bird v {} and p {}", bird.velocity, transform.translation);
     }
 }
