@@ -111,9 +111,11 @@ fn update_birds(
 ) {
     const MAX_STEERING_FORCE: f32 = 0.75;    
     const MAX_VELOCITY: f32 = 5.;        
-    const MIN_DISTANCE: f32 = 0.5;
+    const MIN_DISTANCE: f32 = 0.5;     
     const MIN_VELOCITY: f32 = 0.5;
-    const FOLLOW_FACTOR: f32 = 0.75;
+    const MIN_FOLLOW_DISTANCE: f32 = 0.5;
+    const MAX_FOLLOW_DISTANCE: f32 = 10.;
+    const FOLLOW_FACTOR: f32 = 4.;
     const SEPERATION_FACTOR: f32 = 1.0;
     const ALIGNMENT_FACTOR: f32 = 0.70;
     let delta = time.delta_seconds();
@@ -130,9 +132,9 @@ fn update_birds(
 
     for (entity, mut transform, mut bird) in &mut birds {
         let to_player = (player.translation - transform.translation).xy();
-        let to_player_length = to_player.length().min(12.);
-        let follow = to_player.normalize_or_zero() * (to_player_length * (-to_player_length/3.).exp() * FOLLOW_FACTOR);
-        //let follow = to_player.normalize_or_zero() * (FOLLOW_FACTOR / (to_player_length.min(MIN_DISTANCE)) - 0.1).max(0.);
+        let to_player_length = to_player.length();
+        //let follow = to_player.normalize_or_zero() * (to_player_length * (-to_player_length/3.).exp() * FOLLOW_FACTOR);
+        let follow = to_player.normalize_or_zero() * (FOLLOW_FACTOR / (to_player_length.clamp(MIN_FOLLOW_DISTANCE, MAX_FOLLOW_DISTANCE)));
         let mut seperate = Vec2::new(0., 0.);
         let mut alignment = Vec2::new(0., 0.);
         for n in kdtree.within_unsorted_iter::<SquaredEuclidean>(&[transform.translation.x, transform.translation.y], 2.) {
