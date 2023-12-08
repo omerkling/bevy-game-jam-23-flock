@@ -35,7 +35,7 @@ fn main() {
 
 fn setup(mut commands: Commands) {
     let mut camera_bundle = Camera2dBundle::default();
-    camera_bundle.projection.scaling_mode = ScalingMode::FixedVertical(100.);
+    camera_bundle.projection.scaling_mode = ScalingMode::FixedVertical(200.);
     commands.spawn((camera_bundle, MainCamera));
 }
 
@@ -116,8 +116,9 @@ fn update_birds(
     const MIN_FOLLOW_DISTANCE: f32 = 0.5;
     const MAX_FOLLOW_DISTANCE: f32 = 10.;
     const FOLLOW_FACTOR: f32 = 4.;
-    const SEPERATION_FACTOR: f32 = 1.0;
+    const SEPERATION_FACTOR: f32 = 1.5;
     const ALIGNMENT_FACTOR: f32 = 0.70;
+    const COHESION_FACTOR: f32 = 0.5;
     let delta = time.delta_seconds();
     let player = players.single();
     let mut kdtree: KdTree<f32, u32, 2, 32, u16> = KdTree::with_capacity(birdStats.count);
@@ -137,23 +138,32 @@ fn update_birds(
         let follow = to_player.normalize_or_zero() * (FOLLOW_FACTOR / (to_player_length.clamp(MIN_FOLLOW_DISTANCE, MAX_FOLLOW_DISTANCE)));
         let mut seperate = Vec2::new(0., 0.);
         let mut alignment = Vec2::new(0., 0.);
+        let mut average_position = Vec2::new(0., 0.);
+        let mut cohesion = Vec2::new(0., 0.);
+        let mut nearest_count = 0;
         for n in kdtree.within_unsorted_iter::<SquaredEuclidean>(&[transform.translation.x, transform.translation.y], 2.) {
             if n.item == entity.index() {
                 continue;
-            }
+            }            
             if let Some(other) = positions.get(&n.item) {
+                nearest_count += 1;
                 let distance = n.distance.max(MIN_DISTANCE);
                 let direction_from = (transform.translation.xy() - other.translation.xy()).normalize_or_zero();
                 seperate += direction_from * (SEPERATION_FACTOR / distance);
                 alignment += other.velocity.normalize_or_zero() * (ALIGNMENT_FACTOR / distance);
+                average_position += other.translation.xy();
             }
         }
-
+        if nearest_count > 0 {
+            average_position = average_position / (nearest_count as f32);
+            cohesion = (average_position - transform.translation.xy()).normalize_or_zero() * COHESION_FACTOR;
+        }
         // TODO scale by timestep
         let mut steering_force = (
             follow +
             seperate +
-            alignment 
+            alignment +
+            cohesion
         ).clamp_length_max(MAX_STEERING_FORCE);
 
         bird.velocity = (bird.velocity + steering_force).clamp_length(MIN_VELOCITY, MAX_VELOCITY);
