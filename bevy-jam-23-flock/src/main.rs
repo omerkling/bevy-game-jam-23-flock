@@ -98,6 +98,11 @@ fn update_player(
     }
 }
 
+struct BirdData {
+    translation: Vec2,
+    velocity: Vec2,
+}
+
 fn update_birds(    
     time: Res<Time>,
     players: Query<&Transform, (With<Player>, Without<Bird>)>,
@@ -106,35 +111,48 @@ fn update_birds(
 ) {
     const MAX_STEERING_FORCE: f32 = 0.75;    
     const MAX_VELOCITY: f32 = 5.;        
+    const MIN_DISTANCE: f32 = 0.5;
     const MIN_VELOCITY: f32 = 0.5;
-    const FOLLOW_FACTOR: f32 = 0.1;
-    const SEPERATION_FACTOR: f32 = 0.75;
+    const FOLLOW_FACTOR: f32 = 0.75;
+    const SEPERATION_FACTOR: f32 = 1.0;
+    const ALIGNMENT_FACTOR: f32 = 0.70;
     let delta = time.delta_seconds();
     let player = players.single();
     let mut kdtree: KdTree<f32, u32, 2, 32, u16> = KdTree::with_capacity(birdStats.count);
-    let mut positions = FxHashMap::with_capacity_and_hasher(birdStats.count, Default::default());
+    let mut positions: FxHashMap<u32, BirdData> = FxHashMap::with_capacity_and_hasher(birdStats.count, Default::default());
 
-    for (entity, transform, mut bird) in &mut birds {
+    for (entity, transform, bird) in &mut birds {
         kdtree.add(&[transform.translation.x, transform.translation.y], entity.index());
-        positions.insert(entity.index(), transform.clone());
+        positions.insert(entity.index(), BirdData{
+            translation: transform.translation.xy(), velocity: bird.velocity
+        });
     }
 
     for (entity, mut transform, mut bird) in &mut birds {
-        let to_player = (player.translation - transform.translation).xy() * FOLLOW_FACTOR;
+        let to_player = (player.translation - transform.translation).xy();
+        let to_player_length = to_player.length().min(12.);
+        let follow = to_player.normalize_or_zero() * (to_player_length * (-to_player_length/3.).exp() * FOLLOW_FACTOR);
+        //let follow = to_player.normalize_or_zero() * (FOLLOW_FACTOR / (to_player_length.min(MIN_DISTANCE)) - 0.1).max(0.);
         let mut seperate = Vec2::new(0., 0.);
-        for n in kdtree.within_unsorted_iter::<SquaredEuclidean>(&[transform.translation.x, transform.translation.y], 10.) {
-            if ( n.item == entity.index()) {
+        let mut alignment = Vec2::new(0., 0.);
+        for n in kdtree.within_unsorted_iter::<SquaredEuclidean>(&[transform.translation.x, transform.translation.y], 2.) {
+            if n.item == entity.index() {
                 continue;
             }
             if let Some(other) = positions.get(&n.item) {
-                let distance = n.distance;
+                let distance = n.distance.max(MIN_DISTANCE);
                 let direction_from = (transform.translation.xy() - other.translation.xy()).normalize_or_zero();
-                seperate += direction_from * (distance * SEPERATION_FACTOR);
+                seperate += direction_from * (SEPERATION_FACTOR / distance);
+                alignment += other.velocity.normalize_or_zero() * (ALIGNMENT_FACTOR / distance);
             }
         }
 
         // TODO scale by timestep
-        let mut steering_force = (to_player + seperate).clamp_length_max(MAX_STEERING_FORCE);
+        let mut steering_force = (
+            follow +
+            seperate +
+            alignment 
+        ).clamp_length_max(MAX_STEERING_FORCE);
 
         bird.velocity = (bird.velocity + steering_force).clamp_length(MIN_VELOCITY, MAX_VELOCITY);
         transform.translation = (transform.translation.xy() + bird.velocity * delta * 10.).extend(0.);
