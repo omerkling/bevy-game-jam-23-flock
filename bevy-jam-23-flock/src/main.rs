@@ -107,7 +107,7 @@ fn update_birds(
     time: Res<Time>,
     players: Query<&Transform, (With<Player>, Without<Bird>)>,
     mut birds: Query<(Entity, &mut Transform, &mut Bird), With<Bird>>,
-    birdStats: Res<Birds>,
+    bird_stats: Res<Birds>,
 ) {
     const MAX_STEERING_FORCE: f32 = 0.75;    
     const MAX_VELOCITY: f32 = 5.;        
@@ -116,13 +116,17 @@ fn update_birds(
     const MIN_FOLLOW_DISTANCE: f32 = 0.5;
     const MAX_FOLLOW_DISTANCE: f32 = 10.;
     const FOLLOW_FACTOR: f32 = 4.;
+    const CENTER_FACTOR: f32 = 1.;
+    const MIN_CENTER_DISTANCE: f32 = 50.;
+    const MAX_CENTER_DISTANCE: f32 = 150.;
+
     const SEPERATION_FACTOR: f32 = 1.5;
     const ALIGNMENT_FACTOR: f32 = 0.70;
     const COHESION_FACTOR: f32 = 0.5;
     let delta = time.delta_seconds();
     let player = players.single();
-    let mut kdtree: KdTree<f32, u32, 2, 32, u16> = KdTree::with_capacity(birdStats.count);
-    let mut positions: FxHashMap<u32, BirdData> = FxHashMap::with_capacity_and_hasher(birdStats.count, Default::default());
+    let mut kdtree: KdTree<f32, u32, 2, 32, u16> = KdTree::with_capacity(bird_stats.count);
+    let mut positions: FxHashMap<u32, BirdData> = FxHashMap::with_capacity_and_hasher(bird_stats.count, Default::default());
 
     for (entity, transform, bird) in &mut birds {
         kdtree.add(&[transform.translation.x, transform.translation.y], entity.index());
@@ -135,13 +139,14 @@ fn update_birds(
         let to_player = (player.translation - transform.translation).xy();
         let to_player_length = to_player.length();
         //let follow = to_player.normalize_or_zero() * (to_player_length * (-to_player_length/3.).exp() * FOLLOW_FACTOR);
-        let follow = to_player.normalize_or_zero() * (FOLLOW_FACTOR / (to_player_length.clamp(MIN_FOLLOW_DISTANCE, MAX_FOLLOW_DISTANCE)));
+        let follow = -to_player.normalize_or_zero() * (FOLLOW_FACTOR / (to_player_length.clamp(MIN_FOLLOW_DISTANCE, MAX_FOLLOW_DISTANCE)));
+        let center = -transform.translation.xy().normalize_or_zero() *((transform.translation.xy().length() - MIN_CENTER_DISTANCE)/(MAX_CENTER_DISTANCE-MIN_CENTER_DISTANCE) * CENTER_FACTOR).clamp(0., 1.);  
         let mut seperate = Vec2::new(0., 0.);
         let mut alignment = Vec2::new(0., 0.);
         let mut average_position = Vec2::new(0., 0.);
         let mut cohesion = Vec2::new(0., 0.);
         let mut nearest_count = 0;
-        for n in kdtree.within_unsorted_iter::<SquaredEuclidean>(&[transform.translation.x, transform.translation.y], 2.) {
+        for n in kdtree.nearest_n_within::<SquaredEuclidean>(&[transform.translation.x, transform.translation.y], 5., 10, false) {
             if n.item == entity.index() {
                 continue;
             }            
@@ -163,7 +168,8 @@ fn update_birds(
             follow +
             seperate +
             alignment +
-            cohesion
+            cohesion +
+            center
         ).clamp_length_max(MAX_STEERING_FORCE);
 
         bird.velocity = (bird.velocity + steering_force).clamp_length(MIN_VELOCITY, MAX_VELOCITY);
