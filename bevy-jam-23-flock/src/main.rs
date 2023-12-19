@@ -103,6 +103,10 @@ struct BirdData {
     velocity: Vec2,
 }
 
+fn strength(min: f32, max:f32, d: f32) -> f32 {
+    return ((d - min)/(max-min)).max(0.).min(1.);
+}
+
 fn update_birds(    
     time: Res<Time>,
     players: Query<&Transform, (With<Player>, Without<Bird>)>,
@@ -112,10 +116,10 @@ fn update_birds(
     const MAX_STEERING_FORCE: f32 = 0.75;    
     const MAX_VELOCITY: f32 = 5.;        
     const MIN_DISTANCE: f32 = 0.5;     
-    const MIN_VELOCITY: f32 = 0.5;
-    const MIN_FOLLOW_DISTANCE: f32 = 0.5;
-    const MAX_FOLLOW_DISTANCE: f32 = 10.;
-    const FOLLOW_FACTOR: f32 = 4.;
+    const MIN_VELOCITY: f32 = 0.;
+    const MIN_AVOID_DISTANCE: f32 = 0.5;
+    const MAX_AVOID_DISTANCE: f32 = 20.;
+    const AVOID_FACTOR: f32 = 4.;
     const CENTER_FACTOR: f32 = 1.;
     const MIN_CENTER_DISTANCE: f32 = 50.;
     const MAX_CENTER_DISTANCE: f32 = 150.;
@@ -123,6 +127,7 @@ fn update_birds(
     const SEPERATION_FACTOR: f32 = 1.5;
     const ALIGNMENT_FACTOR: f32 = 0.70;
     const COHESION_FACTOR: f32 = 0.5;
+
     let delta = time.delta_seconds();
     let player = players.single();
     let mut kdtree: KdTree<f32, u32, 2, 32, u16> = KdTree::with_capacity(bird_stats.count);
@@ -135,12 +140,13 @@ fn update_birds(
         });
     }
 
+    let mut count = 0;
     for (entity, mut transform, mut bird) in &mut birds {
+        count+=1;
         let to_player = (player.translation - transform.translation).xy();
         let to_player_length = to_player.length();
-        //let follow = to_player.normalize_or_zero() * (to_player_length * (-to_player_length/3.).exp() * FOLLOW_FACTOR);
-        let follow = -to_player.normalize_or_zero() * (FOLLOW_FACTOR / (to_player_length.clamp(MIN_FOLLOW_DISTANCE, MAX_FOLLOW_DISTANCE)));
-        let center = -transform.translation.xy().normalize_or_zero() *((transform.translation.xy().length() - MIN_CENTER_DISTANCE)/(MAX_CENTER_DISTANCE-MIN_CENTER_DISTANCE) * CENTER_FACTOR).clamp(0., 1.);  
+        let avoid = -to_player.normalize_or_zero() * AVOID_FACTOR * (1. - strength(MIN_AVOID_DISTANCE, MAX_AVOID_DISTANCE, (to_player_length.clamp(MIN_AVOID_DISTANCE, MAX_AVOID_DISTANCE))));
+        let center = -transform.translation.xy().normalize_or_zero() * CENTER_FACTOR * strength(MIN_CENTER_DISTANCE, MAX_CENTER_DISTANCE,transform.translation.xy().length());  
         let mut seperate = Vec2::new(0., 0.);
         let mut alignment = Vec2::new(0., 0.);
         let mut average_position = Vec2::new(0., 0.);
@@ -165,15 +171,19 @@ fn update_birds(
         }
         // TODO scale by timestep
         let mut steering_force = (
-            follow +
+            avoid +
             seperate +
             alignment +
             cohesion +
             center
-        ).clamp_length_max(MAX_STEERING_FORCE);
-
+        ).clamp_length_max(MAX_STEERING_FORCE);        
+        //eprintln!("Steering {}", steering_force);
         bird.velocity = (bird.velocity + steering_force).clamp_length(MIN_VELOCITY, MAX_VELOCITY);
         transform.translation = (transform.translation.xy() + bird.velocity * delta * 10.).extend(0.);
-        // eprintln!("Bird v {} and p {}", bird.velocity, transform.translation);
-    }
+        
+        if(transform.translation.x.is_nan() || transform.translation.y.is_nan()) {
+          eprintln!("steering_force {} Bird v {} and p {}", steering_force, bird.velocity, transform.translation);
+          panic!()
+        }
+    }    
 }
