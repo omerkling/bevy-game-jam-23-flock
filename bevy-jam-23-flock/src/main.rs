@@ -118,8 +118,8 @@ fn update_birds(
     const MIN_DISTANCE: f32 = 0.5;     
     const MIN_VELOCITY: f32 = 0.;
     const MIN_AVOID_DISTANCE: f32 = 0.5;
-    const MAX_AVOID_DISTANCE: f32 = 20.;
-    const AVOID_FACTOR: f32 = 4.;
+    const MAX_AVOID_DISTANCE: f32 = 40.;
+    const AVOID_FACTOR: f32 = 8.;
     const CENTER_FACTOR: f32 = 1.;
     const MIN_CENTER_DISTANCE: f32 = 50.;
     const MAX_CENTER_DISTANCE: f32 = 150.;
