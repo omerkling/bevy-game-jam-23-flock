@@ -104,7 +104,7 @@ struct BirdData {
 }
 
 fn strength(min: f32, max:f32, d: f32) -> f32 {
-    return ((d - min)/(max-min)).max(0.).min(1.);
+    ((d - min)/(max-min)).max(0.).min(1.)
 }
 
 fn update_birds(    
